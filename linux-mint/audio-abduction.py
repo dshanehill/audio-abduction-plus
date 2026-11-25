@@ -84,13 +84,21 @@ def mac_host():
 PORT = 46000
 
 
+STREAM_TAG = "audio_abduction"  # marks the RTP sender we load
+REPORT_PORT = PORT + 1          # the Mac reports its output delay here
+LINUX_SIDE_MS = 35              # PipeWire quantum + RTP packets + network, roughly
+ALOOP_REPORTED_MS = 50          # the virtual card's own buffer: players already count it,
+                                # but the sound sent to the Mac is taken before it
+DEFAULT_MAC_MS = 245            # until the Mac reports (Bluetooth headphones)
+
+
 def our_module_ids():
-    """Modules we loaded: the 'Mac' null sink and the RTP sender reading its monitor."""
+    """Modules we loaded: the RTP sender (and, without the virtual card, a null sink)."""
     ids = []
     for line in sh("pactl", "list", "short", "modules").splitlines():
         parts = line.split("\t")
         if len(parts) > 2 and parts[1] in ("module-null-sink", "module-rtp-send") \
-                and SINK_NAME in parts[2]:
+                and (SINK_NAME in parts[2] or STREAM_TAG in parts[2]):
             ids.append(parts[0])
     return ids
 
@@ -102,6 +110,36 @@ def is_on():
         return False
 
 
+def aloop_sink():
+    """The virtual sound card (snd-aloop) used for beaming, as (sink, card), or None.
+
+    Unlike a null sink, a sound card can carry a latency offset, which tells video
+    players how late the sound really is so they hold the picture back to match.
+    """
+    try:
+        sinks = [l.split("\t")[1] for l in sh("pactl", "list", "short", "sinks").splitlines()
+                 if "snd_aloop" in l]
+        cards = [l.split("\t")[1] for l in sh("pactl", "list", "short", "cards").splitlines()
+                 if "snd_aloop" in l]
+    except RuntimeError:
+        return None
+    return (sinks[0], cards[0]) if sinks and cards else None
+
+
+def set_av_delay(ms):
+    """Tell players the sound comes out `ms` late, so they delay video to match."""
+    a = aloop_sink()
+    if not a:
+        return False
+    offset_us = max(0, int(ms) - ALOOP_REPORTED_MS) * 1000
+    for port in ("analog-output", "analog-output-lineout"):
+        r = subprocess.run(["pactl", "set-port-latency-offset", a[1], port, str(offset_us)],
+                           capture_output=True)
+        if r.returncode == 0:
+            return True
+    return False
+
+
 def move_all_streams(sink):
     for line in sh("pactl", "list", "short", "sink-inputs").splitlines():
         sid = line.split("\t")[0]
@@ -110,17 +148,27 @@ def move_all_streams(sink):
 
 def turn_on():
     ip = socket.gethostbyname(mac_host())  # works with names like my-mac.local
+    a = aloop_sink()
     prev = sh("pactl", "get-default-sink")
-    if prev != SINK_NAME:
+    if prev != SINK_NAME and not (a and prev == a[0]):
         os.makedirs(os.path.dirname(PREV_FILE), exist_ok=True)
         with open(PREV_FILE, "w") as f:
             f.write(prev)
-    sh("pactl", "load-module", "module-null-sink", f"sink_name={SINK_NAME}",
-       "sink_properties=device.description=Audio-Abduction+", "rate=48000", "channels=2")
-    sh("pactl", "load-module", "module-rtp-send", f"source={SINK_NAME}.monitor",
-       f"destination_ip={ip}", f"port={PORT}", "loop=0")
-    sh("pactl", "set-default-sink", SINK_NAME)
-    move_all_streams(SINK_NAME)
+    if a:
+        sink = a[0]
+        subprocess.run(["pactl", "set-card-profile", a[1], "output:analog-stereo"],
+                       capture_output=True)
+        a = aloop_sink()  # the sink can be renamed by the profile change
+        sink = a[0] if a else sink
+        set_av_delay(av_delay_ms())
+    else:  # no virtual card: plain null sink (works, but video can't be held back)
+        sink = SINK_NAME
+        sh("pactl", "load-module", "module-null-sink", f"sink_name={SINK_NAME}",
+           "sink_properties=device.description=Audio-Abduction+", "rate=48000", "channels=2")
+    sh("pactl", "load-module", "module-rtp-send", f"source={sink}.monitor",
+       f"destination_ip={ip}", f"port={PORT}", "loop=0", f"stream_name={STREAM_TAG}")
+    sh("pactl", "set-default-sink", sink)
+    move_all_streams(sink)
 
 
 def turn_off():
@@ -134,6 +182,40 @@ def turn_off():
     if prev:
         subprocess.run(["pactl", "set-default-sink", prev], capture_output=True)
         move_all_streams(prev)
+
+
+_mac_ms = None  # latest output delay reported by the Mac
+
+
+def av_delay_ms():
+    """Total delay from this PC to the Mac's speakers or headphones."""
+    cfg = read_config().get("AV_DELAY_MS")
+    if cfg:  # fixed override from the config file
+        return int(cfg)
+    return (_mac_ms if _mac_ms is not None else DEFAULT_MAC_MS) + LINUX_SIDE_MS
+
+
+def listen_for_mac_delay():
+    """The Mac reports its output delay every 2 s; keep the video delay matched to it."""
+    global _mac_ms
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(("0.0.0.0", REPORT_PORT))
+    except OSError:
+        return
+    applied = None
+    while True:
+        try:
+            msg = sock.recv(64).decode(errors="ignore").split()
+            if len(msg) != 2 or msg[0] != "AALAT":
+                continue
+            _mac_ms = int(msg[1])
+            total = av_delay_ms()
+            if applied is None or abs(total - applied) >= 10:
+                if set_av_delay(total):
+                    applied = total
+        except (ValueError, OSError):
+            continue
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +536,7 @@ class App:
             self.icon.connect("popup-menu", lambda i, b, t: self.menu.popup(
                 None, None, Gtk.StatusIcon.position_menu, i, b, t))
 
+        threading.Thread(target=listen_for_mac_delay, daemon=True).start()
         self.refresh()
         GLib.timeout_add_seconds(2, self.refresh)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.quit)

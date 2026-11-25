@@ -14,6 +14,20 @@ if [ -n "$NEED" ]; then
   sudo udevadm control --reload-rules && sudo udevadm trigger || true
 fi
 
+# Virtual sound card for beaming. Unlike a plain virtual speaker it can carry a delay
+# value, so video players hold the picture back to stay in step with the sound.
+if ! lsmod | grep -q snd_aloop; then
+  sudo modprobe snd-aloop
+fi
+[ -f /etc/modules-load.d/audio-abduction-aloop.conf ] || \
+  echo snd-aloop | sudo tee /etc/modules-load.d/audio-abduction-aloop.conf >/dev/null
+mkdir -p ~/.config/wireplumber/main.lua.d
+if ! cmp -s wireplumber/51-audio-abduction.lua ~/.config/wireplumber/main.lua.d/51-audio-abduction.lua; then
+  install -m 644 wireplumber/51-audio-abduction.lua ~/.config/wireplumber/main.lua.d/
+  systemctl --user restart wireplumber || true
+  sleep 2
+fi
+
 if ! pactl info | grep -qi pipewire; then
   echo "Warning: this system isn't using PipeWire (Mint 22+ needed)." >&2
 fi

@@ -1,62 +1,93 @@
 <p align="center"><img src="icon.png" alt="Audio Abduction+ icon: a grey alien wearing headphones, standing in a beam of light from above" width="200"></p>
 
-# Audio Abduction+: Hear Your Linux PC Through Your Mac
+# Audio Abduction+: Every Device, One Pair of Headphones
 
-*One click on the little alien in your Linux Mint panel, and every sound from the Linux PC is beamed over to your Mac and plays through the Mac's speakers or headphones.*
+*Audio Abduction+ gathers the sound from your Linux PC, your Android phone and your Android tablet, and sends all of it to your Mac. Put on the Bluetooth headphones connected to your Mac and you hear everything, from every device, in one place.*
 
 ---
+
+## One pair of headphones for everything
+
+Bluetooth headphones usually connect to one device at a time. If your computer, phone and tablet all make sound, you end up switching your headphones between them, or missing what the others are saying.
+
+Audio Abduction+ works the other way round. Instead of moving your headphones to each device, it brings the sound from each device to one computer:
+
+```
+Android phone  ──USB──┐
+                      ├──►  Linux Mint PC  ──network──►  Mac  ──Bluetooth──►  your headphones
+Android tablet ──USB──┘     (plus its own sound)
+```
+
+- **Your Android phone and tablet** plug into the Linux PC with a USB cable. Their sound plays on the Linux PC.
+- **The Linux PC** mixes that sound with its own and beams all of it over the network to your Mac.
+- **Your Mac** plays everything through whatever it's using: Bluetooth headphones, AirPods or its speakers.
+
+The result reaches further than your headphones can on their own. They stay connected to one computer, and they hear a notification on your phone, a video on your tablet and a program on your Linux PC, all at the same time.
 
 ## A companion to Mouse Jumper+
 
 Audio Abduction+ is a companion app to **[Mouse Jumper+](https://github.com/dshanehill/mouse-jumper-plus)**, which lets a Mac and a Linux Mint PC share one keyboard and mouse.
 
-Mouse Jumper+ moves your keyboard and mouse between the two computers. Audio Abduction+ does the same for sound: it forwards the audio from the Linux machine to the Mac. Together they let you sit at the Mac and use both computers without moving your hands or your headphones.
+Mouse Jumper+ moves your keyboard and mouse between the two computers. Audio Abduction+ does the same for sound. Together they let you sit at the Mac and use both computers, and your phone and tablet, without moving your hands or your headphones.
 
 You don't need Mouse Jumper+ to use Audio Abduction+, but they were built to work side by side.
 
-## Why send Linux audio to the Mac?
+## Why gather the sound on the Mac?
 
-**Your headphones stay on the Mac.** If you wear Bluetooth headphones with your Mac, you don't have to pair them with the Linux PC too, or keep switching them back and forth between computers.
+**Your headphones stay on the Mac.** You don't have to pair them with the Linux PC, the phone and the tablet, or keep switching them between devices.
 
 **You skip Linux Bluetooth trouble.** Bluetooth audio on Linux is well known for being unreliable: headphones that won't reconnect, drop out, stutter, or get stuck in low-quality "headset" mode. Audio Abduction+ avoids all of that. The Linux PC sends its sound over your network, and the Mac, whose Bluetooth audio just works, plays it.
 
-**One set of controls.** The Mac's volume keys and output choice (speakers, headphones, AirPods) cover both computers. Whatever the Mac is playing through, the Linux audio plays through too.
+**One set of controls.** The Mac's volume keys and output choice (speakers, headphones, AirPods) cover every device. Whatever the Mac is playing through, everything else plays through too.
 
 ## How it works
 
-| | Linux Mint PC | Mac |
-|---|---|---|
-| **What runs** | A tray icon (the alien) in the panel | A small background receiver that starts at login |
-| **What it does** | Creates a virtual "Audio-Abduction+" speaker, makes it the default output, and streams it over the network | Listens for the stream and plays it on the Mac's current output |
+| | Android phone or tablet | Linux Mint PC | Mac |
+|---|---|---|---|
+| **What runs** | Nothing to install. USB debugging is turned on | A tray icon (the alien) in the panel | A small background receiver that starts at login |
+| **What it does** | Sends its sound down the USB cable | Plays the phone and tablet sound, adds its own, and streams all of it over the network | Listens for the stream and plays it on the Mac's current output |
 
 - **Click the alien** to beam audio to the Mac. Click it again to bring audio back to the Linux PC's own speakers. Right-click for a menu.
 - When you switch it on, any audio that's already playing moves over straight away. When you switch it off, your previous output is restored.
 - The receiver is tuned for low delay: late network packets are dropped instead of queued, so lag never builds up. When the stream stops, the Mac releases the audio device.
 - You can also toggle it from a keyboard shortcut by running `audio-abduction --toggle`.
 
+## Video stays in step with the sound
+
+Sending sound to another computer and then over Bluetooth takes time: about a quarter of a second with Bluetooth headphones. Audio Abduction+ never holds the sound back to fix that. Instead, on the Linux PC, it tells video players exactly how late the sound will arrive, so they hold the **picture** back by the same amount and lips stay matched to words.
+
+- The Mac measures the delay of whatever it's playing through and reports it every second. Switch between Bluetooth headphones, wired headphones in the headphone jack, USB headphones or speakers and the sound moves over straight away, with the video timing adjusting to match.
+- This works in players that time their video to the sound, which includes web browsers (YouTube and other sites in Chrome or Firefox), VLC and mpv.
+- To fine-tune it, add `AV_DELAY_MS=` followed by the total delay in milliseconds to `~/.config/mac-audio/config` on the Linux PC. Remove the line to go back to automatic.
+- **Phones and tablets:** Android doesn't let another device tell its apps that the sound is playing late, so video on a phone or tablet screen runs ahead of its sound by about a quarter of a second. Some players can fix it for each video. In VLC for Android, for example, set the audio delay to about −250 ms.
+
 ## Phone and tablet audio
 
-Plug an Android phone or tablet into the Linux PC with a USB cable and its sound plays on the Linux PC. While beaming is on, that means it reaches your Mac along with the Linux PC's own audio. Plug in more than one device and you hear them all together.
+Plug an Android phone or tablet into the Linux PC with a USB cable and, within a couple of seconds, its sound plays on the Linux PC. While beaming is on, that means it reaches your Mac along with the Linux PC's own audio. Plug in more than one device and you hear them all together.
 
-- The device needs **Android 11 or newer** with **USB debugging** turned on. The first time you plug it in, unlock it and tap **Allow** when it asks whether to trust this computer.
-- You get a notification when a device connects or unplugs. Its audio stops when you unplug it.
+- The device needs **Android 11 or newer** with **USB debugging** turned on. The first time you plug it in, unlock it, tick **Always allow from this computer**, and tap **Allow**.
+- Plug the device into a USB port on the Linux PC itself. Hubs built into keyboards often don't give a phone enough power to connect.
+- You get a notification when a device connects or unplugs. Its audio stops when you unplug it. If a device's audio keeps failing, you're told to unplug it and plug it back in.
 - By default, the sound moves off the device, so its own speaker goes quiet. To keep it playing on the device as well, turn on **Also play on the phone or tablet** in the alien's right-click menu (Android 13 or newer).
 - To turn the feature off, untick **Phone and tablet audio** in the same menu.
 - While a device is plugged in, its screen won't time out: if Android's **Stay awake** (while charging) setting is off, Audio Abduction+ turns it on. To leave your devices' settings alone, add `KEEP_AWAKE=0` to `~/.config/mac-audio/config`.
 - Keep the device's media volume above zero: Android sends the audio at the device's own volume level.
 - Phone calls can't be captured because Android doesn't allow it. A few apps also block audio capture.
 
-This uses [scrcpy](https://github.com/Genymobile/scrcpy) in audio-only mode (no window, no screen mirroring), sending uncompressed audio over USB for low delay. The installer downloads the official scrcpy build and checks it against its published checksum. If a device's audio won't start, the notification names a log file in `~/.cache/mac-audio/`.
+This uses [scrcpy](https://github.com/Genymobile/scrcpy) in audio-only mode (no window, no screen mirroring), sending uncompressed audio over USB with a 30 ms buffer for low delay. The installer downloads the official scrcpy build and checks it against its published checksum. If a device's audio won't start, the notification names a log file in `~/.cache/mac-audio/`.
+
+Tested with a realme C85 phone (Android 16) and a Samsung Galaxy Tab S7 FE (Android 14), playing at the same time.
 
 ## Under the hood
 
-Under the hood, the Linux side uses PipeWire's PulseAudio modules (`module-null-sink` and `module-rtp-send`) to send uncompressed 48 kHz stereo audio over RTP to UDP port 46000. The Mac side uses [SoX](https://sox.sourceforge.net) to play it.
+The Linux side plays everything into a virtual sound card (the kernel's `snd-aloop`, shown as "Audio-Abduction+ (beam to Mac)") and uses PipeWire's `module-rtp-send` to send uncompressed 48 kHz stereo audio over RTP to UDP port 46000. The virtual card carries a latency offset equal to the delay to your ears, which is what lets video players hold the picture back. The Mac reports its output delay to UDP port 46001. The Mac side uses [SoX](https://sox.sourceforge.net) to play it. Phone and tablet audio arrives through scrcpy and plays into the same PipeWire output, so it travels to the Mac with everything else.
 
 ## What you need
 
 - A Mac with [Homebrew](https://brew.sh) (the installer adds SoX)
 - A PC running Linux Mint 22 or later (Cinnamon) with PipeWire. Other desktops get a basic tray icon.
 - Both computers on the same network, or connected through [Tailscale](https://tailscale.com)
+- Optional: Android phones or tablets running Android 11 or newer, with USB debugging turned on, and USB cables that carry data, not just power
 
 ## Install
 
@@ -78,13 +109,16 @@ cd audio-abduction-plus/linux-mint
 ./install.sh
 ```
 
-When asked, type your Mac's hostname (for example `my-mac.local`) or its IP address, such as its Tailscale address. The alien appears in your panel and starts automatically at login.
+When asked, type your Linux password (to install a few system packages, including the USB permissions phones need, and to turn on the virtual sound card), then your Mac's hostname (for example `my-mac.local`) or its IP address, such as its Tailscale address. The alien appears in your panel and starts automatically at login.
 
 ## Troubleshooting
 
-- **No sound on the Mac:** check that the receiver is running with `launchctl list | grep audio-abduction` and look at `/tmp/audio-abduction.log`. Make sure nothing (such as a firewall) is blocking UDP port 46000.
+- **No sound on the Mac:** check that the receiver is running with `launchctl list | grep audio-abduction` and look at `/tmp/audio-abduction.log`. Make sure nothing (such as a firewall) is blocking UDP ports 46000 and 46001.
 - **Wrong Mac address:** edit `~/.config/mac-audio/config` on the Linux PC and change the `MAC_HOST=` line.
 - **"Couldn't switch" message:** the notification includes the reason. Audio stays on the Linux PC until it's fixed.
+- **Phone or tablet isn't detected:** plug it straight into the Linux PC rather than a keyboard hub, try a different cable, and check that USB debugging is on. If it asks, tap **Allow** on the device.
+- **Phone or tablet is connected but silent:** turn up the device's media volume.
+- **Video and sound out of step on the Linux PC:** check that the output is "Audio-Abduction+ (beam to Mac)" (run `lsmod | grep snd_aloop`; if nothing shows, re-run `install.sh`). To nudge the timing by hand, set `AV_DELAY_MS` as described above.
 
 ## Uninstall
 
@@ -97,12 +131,12 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/local.audio-abduction.plus
 **Linux Mint:**
 
 ```bash
-pkill -f bin/audio-abduction; rm -rf ~/.local/bin/audio-abduction ~/.config/autostart/audio-abduction.desktop ~/.local/share/applications/audio-abduction.desktop ~/.local/share/audio-abduction ~/.config/mac-audio ~/.cache/mac-audio
+pkill -f bin/audio-abduction; rm -rf ~/.local/bin/audio-abduction ~/.config/autostart/audio-abduction.desktop ~/.local/share/applications/audio-abduction.desktop ~/.local/share/audio-abduction ~/.config/mac-audio ~/.cache/mac-audio ~/.config/wireplumber/main.lua.d/51-audio-abduction.lua; sudo rm -f /etc/modules-load.d/audio-abduction-aloop.conf
 ```
 
 ## Security note
 
-The audio stream is not encrypted. On a home network that's usually fine. If you're on a shared network, connect the two computers through Tailscale, which encrypts the traffic.
+The audio stream is not encrypted. On a home network that's usually fine. If you're on a shared network, connect the two computers through Tailscale, which encrypts the traffic. Phone and tablet audio travels only over the USB cable to the Linux PC.
 
 ## License
 
