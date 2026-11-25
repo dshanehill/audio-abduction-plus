@@ -62,3 +62,11 @@ Shane's devices: a **Realme C85** phone and a **Samsung tablet**, both with USB 
 - **Target machine: the Linux Mint PC.** Shane said not to concern ourselves with the Zorin machine.
 - **No internet over USB** (reverse tethering). Shane ruled it out.
 - Known limits: Android 11+ only; phone calls can't be captured; some apps block capture; the device goes quiet unless "Also play" is on.
+
+## Video in step with the sound (added 2026-11-25)
+Shane asked that sound is never delayed; instead video waits for it.
+- **Linux PC:** beaming now goes through a `snd-aloop` virtual sound card (kernel module loaded at boot via `/etc/modules-load.d/audio-abduction-aloop.conf`). Its port latency offset tells players the real delay, so they hold video back. A null sink can't carry an offset on PipeWire 1.0.5 (ProcessLatency, Props latencyOffsetNsec and a pw-loopback were all tried and ignored).
+- **Mac receiver** reports its output delay (CoreAudio latency + safety offset + buffer + stream latency, +15 ms for itself) to the sender on UDP 46001 every second, and reopens the player when the Mac's default output changes. Soundcore Life Q20 over Bluetooth reports 240 ms.
+- Offset = Mac delay + 35 ms (Linux side + network) − 50 ms (the virtual card's own buffer, which players already count but the RTP monitor isn't delayed by). Headphones → 225 ms offset; it tracks output changes within about a second. `AV_DELAY_MS` in the config overrides the total.
+- Checked: players see the extra delay (a PulseAudio client's reported latency rose by the offset); phone and tablet audio flow through the card. **Not checked by eye** with a real video.
+- **Android:** no way without root to make apps delay their video; documented the VLC per-video workaround.
