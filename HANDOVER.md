@@ -38,7 +38,13 @@ Shane's devices: a **Realme C85** phone and a **Samsung tablet**, both with USB 
 
 ## Status
 - Parsers and the start/stop/retry logic were tested in the cloud with fake `adb` and `scrcpy`, and all of it passed.
-- **Not yet tested on real hardware.**
+- **Tested on the Linux Mint PC on 2026-11-25** (over SSH as `david@100.104.209.20`) with the Samsung tablet (SM-T738U, Android 14):
+  - The installer's scrcpy download and checksum passed; adb is bundled.
+  - Tablet audio played into the Mac beaming output, moved to the PC speakers when beaming was turned off, and moved back when it was turned on.
+  - "Also play on the phone or tablet" ran scrcpy with `--audio-dup`; audio reached the PC and kept playing on the tablet.
+  - A 4 s tone at 50 ms and 20 ms buffers had no dropouts. Default is now 30 ms (`AUDIO_BUFFER` in the config).
+  - `android-sdk-platform-tools-common` (needs sudo) wasn't installed, yet adb saw the tablet fine.
+- **Not yet tested:** the Realme C85, two devices at once, and unplug/replug.
 
 ## Next steps
 1. Push the branch to GitHub.

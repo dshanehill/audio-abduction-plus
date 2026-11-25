@@ -352,7 +352,9 @@ class DeviceWatcher:
 
     def _start_proc(self, adb, scrcpy, serial, d):
         cmd = [scrcpy, "-s", serial, "--no-video", "--no-window", "--require-audio",
-               "--audio-codec=raw", "--no-power-on"]
+               "--audio-codec=raw", "--no-power-on",
+               # scrcpy's default is 50 ms; 30 ms tested clean on a Galaxy Tab
+               f"--audio-buffer={read_config().get('AUDIO_BUFFER', '30')}"]
         if self.dup and d["dup_ok"] and d["sdk"] >= self.DUP_SDK:
             cmd.append("--audio-dup")
         os.makedirs(CACHE_DIR, exist_ok=True)
