@@ -34,6 +34,20 @@ You don't need Mouse Jumper+ to use Audio Abduction+, but they were built to wor
 - The receiver is tuned for low delay: late network packets are dropped instead of queued, so lag never builds up. When the stream stops, the Mac releases the audio device.
 - You can also toggle it from a keyboard shortcut by running `audio-abduction --toggle`.
 
+## Phone and tablet audio
+
+Plug an Android phone or tablet into the Linux PC with a USB cable and its sound plays on the Linux PC. While beaming is on, that means it reaches your Mac along with the Linux PC's own audio. Plug in more than one device and you hear them all together.
+
+- The device needs **Android 11 or newer** with **USB debugging** turned on. The first time you plug it in, unlock it and tap **Allow** when it asks whether to trust this computer.
+- You get a notification when a device connects or unplugs. Its audio stops when you unplug it.
+- By default, the sound moves off the device, so its own speaker goes quiet. To keep it playing on the device as well, turn on **Also play on the phone or tablet** in the alien's right-click menu (Android 13 or newer).
+- To turn the feature off, untick **Phone and tablet audio** in the same menu.
+- Phone calls can't be captured because Android doesn't allow it. A few apps also block audio capture.
+
+This uses [scrcpy](https://github.com/Genymobile/scrcpy) in audio-only mode (no window, no screen mirroring), sending uncompressed audio over USB for low delay. The installer downloads the official scrcpy build and checks it against its published checksum. If a device's audio won't start, the notification names a log file in `~/.cache/mac-audio/`.
+
+## Under the hood
+
 Under the hood, the Linux side uses PipeWire's PulseAudio modules (`module-null-sink` and `module-rtp-send`) to send uncompressed 48 kHz stereo audio over RTP to UDP port 46000. The Mac side uses [SoX](https://sox.sourceforge.net) to play it.
 
 ## What you need
