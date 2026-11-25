@@ -43,8 +43,12 @@ Shane's devices: a **Realme C85** phone and a **Samsung tablet**, both with USB 
   - Tablet audio played into the Mac beaming output, moved to the PC speakers when beaming was turned off, and moved back when it was turned on.
   - "Also play on the phone or tablet" ran scrcpy with `--audio-dup`; audio reached the PC and kept playing on the tablet.
   - A 4 s tone at 50 ms and 20 ms buffers had no dropouts. Default is now 30 ms (`AUDIO_BUFFER` in the config).
-  - `android-sdk-platform-tools-common` (needs sudo) wasn't installed, yet adb saw the tablet fine.
-- **Not yet tested:** the Realme C85, two devices at once, and unplug/replug.
+  - The tablet worked without `android-sdk-platform-tools-common`, but the **Realme C85 (RMX5566, Android 16) needs it**: without its udev rules the phone's USB node is root-only and adb can't see it. Shane installed it on 2026-11-25.
+  - Realme audio reached the PC and the Mac. Its media volume was 0, which makes the capture silent too; set to 10/16.
+  - Both devices streamed at the same time. After an adb server restart, both came back and the app restarted their audio automatically.
+  - Both devices are set to "Always allow" for this PC.
+  - New: when a device connects, the app turns on Android's "Stay awake" while charging if it is off (`KEEP_AWAKE=0` in the config disables this).
+- **Not tested on hardware:** physically unplugging a device (covered only by the fake-adb tests).
 
 ## Next steps
 1. Push the branch to GitHub.
@@ -52,7 +56,7 @@ Shane's devices: a **Realme C85** phone and a **Samsung tablet**, both with USB 
 3. Plug in the Realme, then the Samsung tablet. Check that audio reaches the Mac with beaming on, and that it plays on the Linux PC with beaming off. Check unplugging, both devices playing at once, and the "Also play on device" option.
 4. Check the static scrcpy tarball. It's assumed to contain `scrcpy` and `adb` at the top level once `--strip-components=1` is applied. If adb isn't bundled, use the system `adb` (the code already falls back to PATH).
 5. Try lowering delay with `--audio-buffer=20` or `30` (scrcpy's default is 50 ms). Check for crackling.
-6. If everything works, merge into `main` and push.
+6. ~~Merge into `main` and push.~~ Done 2026-11-25.
 
 ## Decisions and scope
 - **Target machine: the Linux Mint PC.** Shane said not to concern ourselves with the Zorin machine.
