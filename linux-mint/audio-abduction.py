@@ -317,11 +317,31 @@ class DeviceWatcher:
         sdk = int(props.get("ro.build.version.sdk", "0") or 0)
         d = dict(name=device_name(props, serial), sdk=sdk, proc=None, log=None, fails=0,
                  gave_up=False, dup_ok=True, last_start=0, announced=False)
+        self._keep_awake(adb, serial)
         if sdk and sdk < self.MIN_SDK:
             d["gave_up"] = True
             notify(f"{d['name']} runs Android {props.get('ro.build.version.release', '?')}. "
                    "Sending its audio needs Android 11 or newer.")
         return d
+
+    @staticmethod
+    def _keep_awake(adb, serial):
+        """Screen never times out while plugged in (Android's "Stay awake").
+
+        Only turns it on when it's fully off; never narrows an existing choice.
+        Set KEEP_AWAKE=0 in the config to leave devices alone.
+        """
+        if read_config().get("KEEP_AWAKE", "1") != "1":
+            return
+        key = "stay_on_while_plugged_in"
+        try:
+            r = subprocess.run([adb, "-s", serial, "shell", "settings", "get", "global", key],
+                               capture_output=True, text=True, timeout=10)
+            if r.stdout.strip() in ("0", "null", ""):
+                subprocess.run([adb, "-s", serial, "shell", "settings", "put", "global",
+                                key, "7"], capture_output=True, timeout=10)  # AC, USB, wireless
+        except (subprocess.TimeoutExpired, OSError):
+            pass
 
     def _keep_running(self, adb, scrcpy, serial, d):
         """Start or restart scrcpy for one device. Returns True if the menu should update."""

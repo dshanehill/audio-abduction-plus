@@ -42,6 +42,7 @@ Plug an Android phone or tablet into the Linux PC with a USB cable and its sound
 - You get a notification when a device connects or unplugs. Its audio stops when you unplug it.
 - By default, the sound moves off the device, so its own speaker goes quiet. To keep it playing on the device as well, turn on **Also play on the phone or tablet** in the alien's right-click menu (Android 13 or newer).
 - To turn the feature off, untick **Phone and tablet audio** in the same menu.
+- While a device is plugged in, its screen won't time out: if Android's **Stay awake** (while charging) setting is off, Audio Abduction+ turns it on. To leave your devices' settings alone, add `KEEP_AWAKE=0` to `~/.config/mac-audio/config`.
 - Phone calls can't be captured because Android doesn't allow it. A few apps also block audio capture.
 
 This uses [scrcpy](https://github.com/Genymobile/scrcpy) in audio-only mode (no window, no screen mirroring), sending uncompressed audio over USB for low delay. The installer downloads the official scrcpy build and checks it against its published checksum. If a device's audio won't start, the notification names a log file in `~/.cache/mac-audio/`.
