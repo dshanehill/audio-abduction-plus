@@ -2,7 +2,8 @@
 """Audio Abduction+ (Mac side): plays RTP audio (L16, 48 kHz stereo) sent by the Mint toggle, with minimal buffering.
 
 Listens on UDP 46000, strips the RTP header and pipes raw PCM to sox's `play`, which
-outputs to the Mac's current default device (speakers or headphones).
+outputs to whatever the Mac is using right now (speakers, USB or Bluetooth headphones).
+When the Mac switches outputs, playback moves over within about a quarter second.
 Late packets are dropped rather than queued, so delay never builds up.
 
 Every 2 s while audio is arriving, it tells the sender how long the Mac's current output
@@ -23,6 +24,8 @@ IDLE_RESTART = 1.0  # seconds of no packets -> close the player so it re-opens f
 REPORT_PORT = PORT + 1  # where the Linux PC listens for our delay reports
 REPORT_EVERY = 1.0
 PLAYER_MS = 15  # this receiver's own buffering (sox chunk + pipe), roughly
+DEVICE_CHECK = 0.25  # how often to look for a new Mac output (seconds)
+STALL_LIMIT = 0.5  # player not taking audio for this long -> it's wedged; kill and reopen
 
 
 def _fourcc(s):
@@ -76,6 +79,19 @@ def start_player():
         stdin=subprocess.PIPE, bufsize=0)
 
 
+def stop_player(player):
+    """Close the player; kill it if it doesn't exit (e.g. its output device vanished)."""
+    try:
+        player.stdin.close()
+    except OSError:
+        pass
+    try:
+        player.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        player.kill()
+        player.wait()
+
+
 def payload(pkt):
     if len(pkt) < 12 or pkt[0] >> 6 != 2:
         return None
@@ -96,14 +112,14 @@ def main():
     player = None
     last_seq = None
     last_report = 0.0
+    last_dev_check = 0.0
     out_dev = default_output()
     while True:
         try:
             pkt, sender = sock.recvfrom(4096)
         except socket.timeout:
             if player:  # stream stopped: release the audio device
-                player.stdin.close()
-                player.wait()
+                stop_player(player)
                 player = None
                 last_seq = None
             continue
@@ -115,15 +131,17 @@ def main():
             continue  # out-of-order/late packet: drop it
         last_seq = seq
         now = time.monotonic()
+        if now - last_dev_check > DEVICE_CHECK:
+            last_dev_check = now
+            dev = default_output()
+            if dev != out_dev:  # the Mac switched outputs (USB, Bluetooth, speakers...)
+                out_dev = dev
+                last_report = 0.0  # send the new output's delay right away
+                if player:  # reopen on the new output so the sound follows the Mac's choice
+                    stop_player(player)
+                    player = None
         if now - last_report > REPORT_EVERY:
             last_report = now
-            dev = default_output()
-            if dev != out_dev:  # you switched outputs (jack, USB, Bluetooth...)
-                out_dev = dev
-                if player:  # reopen on the new output so sound and delay both follow
-                    player.stdin.close()
-                    player.wait()
-                    player = None
             ms = output_delay_ms()
             if ms is not None:
                 try:
@@ -132,9 +150,22 @@ def main():
                     pass
         if player is None or player.poll() is not None:
             player = start_player()
+            os.set_blocking(player.stdin.fileno(), False)
+            stalled_since = None
+            pending = b""
         try:
-            player.stdin.write(data)
-        except BrokenPipeError:
+            buf = pending + data
+            n = os.write(player.stdin.fileno(), buf)
+            pending = buf[n:][-4096:]  # partial write: finish it next time (keeps samples aligned)
+            stalled_since = None
+        except BlockingIOError:  # player isn't keeping up: drop this packet
+            if stalled_since is None:
+                stalled_since = now
+            elif now - stalled_since > STALL_LIMIT:  # wedged (lost its device): restart it
+                print("player stalled, restarting it", file=sys.stderr, flush=True)
+                stop_player(player)
+                player = None
+        except (BrokenPipeError, OSError):
             player = None
 
 
