@@ -67,7 +67,7 @@ Sometimes you want the Linux PC's speakers or headphones instead. Both apps have
 
 ### Using a screen reader on the Linux PC
 
-If you use a screen reader on the Linux PC, its speech can sometimes crackle while it's being sent to the Mac. I see this with **Lucent**, the magnifier and reader I made for Linux Mint. It does many of the same jobs as ZoomText: it magnifies the screen and reads text aloud.
+If you use a screen reader on the Linux PC, its speech can sometimes crackle while it's being sent to the Mac. I see this with **Lucent**, the magnifier and reader I made for Linux Mint. It does many of the same jobs as ZoomText: it magnifies the screen and reads text aloud. Lucent is still in development and is in its quality-control phase now. It will be available soon.
 
 - **Quick fix:** restart the reader. Lucent has a Restart button for this, and the speech comes back clean.
 - **Make the Linux PC your main computer for sound:** click **Forward to Linux**. The reader then speaks straight through the PC's own speakers or headphones, with nothing sent over the network, and your Mac's sound comes along to the PC. Click **Forward to Mac** whenever you want to switch back.
