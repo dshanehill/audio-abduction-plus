@@ -44,10 +44,12 @@ You don't need Mouse Jumper+ to use Audio Abduction+, but they were built to wor
 
 | | Android phone or tablet | Linux Mint PC | Mac |
 |---|---|---|---|
-| **What runs** | Nothing to install. USB debugging is turned on | A tray icon (the alien) in the panel | A small background receiver that starts at login |
+| **What runs** | Nothing to install. USB debugging is turned on | A tray icon (the alien) in the panel, with a Settings window | An app with a Dock icon, a menu bar icon and a Settings window. It starts at login |
 | **What it does** | Sends its sound down the USB cable | Plays the phone and tablet sound, adds its own, and streams all of it over the network | Listens for the stream and plays it on the Mac's current output |
 
 - **Click the alien** to beam audio to the Mac. Click it again to bring audio back to the Linux PC's own speakers. Right-click for a menu.
+- **Settings on the Linux PC:** right-click the alien and choose **Settings…**, or open Audio Abduction+ from the menu. It shows whether the Mac is receiving, which phones and tablets are connected, and has switches for everything below. You no longer need to edit the config file.
+- **Settings on the Mac:** click the Dock icon or the menu bar icon. It shows whether sound is arriving and where it's playing, and has a volume slider, a connection setting (choose Most Reliable if the sound skips), Open at Login, and Show in Dock or menu bar.
 - When you switch it on, any audio that's already playing moves over straight away. When you switch it off, your previous output is restored.
 - The receiver is tuned for low delay: late network packets are dropped instead of queued, so lag never builds up. When the stream stops, the Mac releases the audio device.
 - You can also toggle it from a keyboard shortcut by running `audio-abduction --toggle`.
@@ -99,7 +101,7 @@ cd audio-abduction-plus/mac
 ./install.sh
 ```
 
-This builds **Audio Abduction+.app** in `~/Applications` and starts it at login. If macOS asks whether Python may accept incoming network connections, click **Allow**.
+This builds **Audio Abduction+.app** in `~/Applications` (it needs Apple's command line tools; the installer offers to add them) and starts it at login. Its icon appears in the Dock and the menu bar. If macOS asks whether Python may accept incoming network connections, click **Allow**.
 
 ### 2. On the Linux Mint PC
 
@@ -113,8 +115,8 @@ When asked, type your Linux password (to install a few system packages, includin
 
 ## Troubleshooting
 
-- **No sound on the Mac:** check that the receiver is running with `launchctl list | grep audio-abduction` and look at `/tmp/audio-abduction.log`. Make sure nothing (such as a firewall) is blocking UDP ports 46000 and 46001.
-- **Wrong Mac address:** edit `~/.config/mac-audio/config` on the Linux PC and change the `MAC_HOST=` line.
+- **No sound on the Mac:** open Audio Abduction+ on the Mac and check that **Play Sound From PC** is on and the status says it's playing. On the Linux PC, Settings shows **Waiting for your Mac** if the Mac isn't answering. The Mac's log is under **Having trouble? › Show Log** (`/tmp/audio-abduction.log`). Make sure nothing (such as a firewall) is blocking UDP ports 46000 and 46001.
+- **Wrong Mac address:** on the Linux PC, open Settings and change **Mac Name or Address**.
 - **"Couldn't switch" message:** the notification includes the reason. Audio stays on the Linux PC until it's fixed.
 - **Phone or tablet isn't detected:** plug it straight into the Linux PC rather than a keyboard hub, try a different cable, and check that USB debugging is on. If it asks, tap **Allow** on the device.
 - **Phone or tablet is connected but silent:** turn up the device's media volume.

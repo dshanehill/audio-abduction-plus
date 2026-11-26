@@ -23,6 +23,8 @@ PLAY = "/opt/homebrew/bin/play"
 IDLE_RESTART = 1.0  # seconds of no packets -> close the player so it re-opens fresh
 REPORT_PORT = PORT + 1  # where the Linux PC listens for our delay reports
 REPORT_EVERY = 1.0
+VOLUME = float(os.environ.get("AA_VOLUME", "1.0"))  # 1.0 = unchanged; lower it if you hear clipping
+BUFFER = int(os.environ.get("AA_BUFFER", "1024"))  # sox chunk size in bytes; smaller = lower delay
 PLAYER_MS = 15  # this receiver's own buffering (sox chunk + pipe), roughly
 DEVICE_CHECK = 0.25  # how often to look for a new Mac output (seconds)
 STALL_LIMIT = 0.5  # player not taking audio for this long -> it's wedged; kill and reopen
@@ -74,8 +76,9 @@ def output_delay_ms():
 def start_player():
     # --buffer is bytes per sox I/O chunk; small = low latency.
     return subprocess.Popen(
-        [PLAY, "-q", "--buffer", "1024", "-t", "raw", "-e", "signed-integer",
-         "-b", "16", "-B", "-r", str(RATE), "-c", str(CHANNELS), "-"],
+        [PLAY, "-q", "--buffer", str(BUFFER), "-t", "raw", "-e", "signed-integer",
+         "-b", "16", "-B", "-r", str(RATE), "-c", str(CHANNELS), "-"]
+        + (["vol", f"{VOLUME:.3f}"] if abs(VOLUME - 1.0) > 0.001 else []),
         stdin=subprocess.PIPE, bufsize=0)
 
 
@@ -104,7 +107,16 @@ def payload(pkt):
     return data
 
 
+def status(msg):
+    """One line for the Audio Abduction+ app window (stdout)."""
+    try:
+        print("STATUS " + msg, flush=True)
+    except (BrokenPipeError, OSError):
+        pass
+
+
 def main():
+    parent = os.getppid()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("0.0.0.0", PORT))
@@ -114,7 +126,10 @@ def main():
     last_report = 0.0
     last_dev_check = 0.0
     out_dev = default_output()
+    status("listening")
     while True:
+        if os.getppid() != parent:  # the app that started us is gone: don't hold the port
+            sys.exit(0)
         try:
             pkt, sender = sock.recvfrom(4096)
         except socket.timeout:
@@ -122,6 +137,7 @@ def main():
                 stop_player(player)
                 player = None
                 last_seq = None
+                status("listening")
             continue
         data = payload(pkt)
         if not data:
@@ -143,6 +159,7 @@ def main():
         if now - last_report > REPORT_EVERY:
             last_report = now
             ms = output_delay_ms()
+            status(f"streaming {sender[0]} {ms if ms is not None else -1}")
             if ms is not None:
                 try:
                     sock.sendto(f"AALAT {ms}".encode(), (sender[0], REPORT_PORT))

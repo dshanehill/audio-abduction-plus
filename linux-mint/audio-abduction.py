@@ -74,6 +74,13 @@ def set_config(key, value):
         f.writelines(f"{k}={v}\n" for k, v in cfg.items())
 
 
+def del_config(key):
+    cfg = read_config()
+    if cfg.pop(key, None) is not None:
+        with open(CONFIG, "w") as f:
+            f.writelines(f"{k}={v}\n" for k, v in cfg.items())
+
+
 def mac_host():
     host = read_config().get("MAC_HOST")
     if not host:
@@ -185,6 +192,7 @@ def turn_off():
 
 
 _mac_ms = None  # latest output delay reported by the Mac
+_mac_last = 0.0  # when the Mac last reported (shows the Mac is receiving)
 
 
 def av_delay_ms():
@@ -197,7 +205,7 @@ def av_delay_ms():
 
 def listen_for_mac_delay():
     """The Mac reports its output delay every 2 s; keep the video delay matched to it."""
-    global _mac_ms
+    global _mac_ms, _mac_last
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.bind(("0.0.0.0", REPORT_PORT))
@@ -210,6 +218,7 @@ def listen_for_mac_delay():
             if len(msg) != 2 or msg[0] != "AALAT":
                 continue
             _mac_ms = int(msg[1])
+            _mac_last = time.time()
             total = av_delay_ms()
             if applied is None or abs(total - applied) >= 10:
                 if set_av_delay(total):
@@ -315,6 +324,32 @@ class DeviceWatcher:
             for d in self.devices.values():
                 self._stop_proc(d)
                 d.update(fails=0, gave_up=False, dup_ok=True, last_start=0)
+
+    def summary(self):
+        """[(name, plain-language state, colour)] for the settings window."""
+        out = []
+        with self.lock:
+            for d in self.devices.values():
+                if d["proc"] and d["proc"].poll() is None:
+                    out.append((d["name"], "Playing", "#34c759"))
+                elif d["gave_up"] and d["sdk"] and d["sdk"] < self.MIN_SDK:
+                    out.append((d["name"], "Needs Android 11 or newer", "#8e8e93"))
+                elif d["gave_up"]:
+                    out.append((d["name"], "Couldn't connect. Unplug it and plug it back in.",
+                                "#ff3b30"))
+                else:
+                    out.append((d["name"], "Connecting…", "#ff9500"))
+            for _ in self.warned:
+                out.append(("Phone or tablet", "Unlock it and tap Allow", "#ff9500"))
+        return out
+
+    def restart_all(self):
+        """Reconnect every device (e.g. after changing the connection setting)."""
+        with self.lock:
+            for d in self.devices.values():
+                self._stop_proc(d)
+                d.update(fails=0, gave_up=False, dup_ok=True, last_start=0)
+        self.on_change()
 
     def names(self):
         with self.lock:
@@ -518,10 +553,13 @@ class App:
         self.devices_item = Gtk.MenuItem(label="No phone or tablet connected")
         self.devices_item.set_sensitive(False)
 
+        settings_item = Gtk.MenuItem(label="Settings…")
+        settings_item.connect("activate", lambda *_: self.show_settings())
+        self.settings = None
         quit_item = Gtk.MenuItem(label="Quit")
         quit_item.connect("activate", lambda *_: self.quit())
         for item in (self.check, Gtk.SeparatorMenuItem(), self.phone_check, self.dup_check,
-                     self.devices_item, Gtk.SeparatorMenuItem(), quit_item):
+                     self.devices_item, Gtk.SeparatorMenuItem(), settings_item, quit_item):
             self.menu.append(item)
         self.menu.show_all()
 
@@ -541,7 +579,18 @@ class App:
         GLib.timeout_add_seconds(2, self.refresh)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.quit)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self.quit)
+        # Opening the app again from the menu sends SIGUSR1: show Settings.
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
+                             lambda *_: self.show_settings() or True)
         self.watcher.start()
+
+    def show_settings(self):
+        if self.settings is None:
+            sys.path.insert(0, ICON_DIR)  # aa_settings.py is installed next to the icons
+            import aa_settings
+            self.settings = aa_settings.SettingsWindow(self, sys.modules[__name__])
+        self.settings.present_settings()
+        return False
 
     def quit(self, *_):
         self.watcher.shutdown()
@@ -595,6 +644,10 @@ class App:
             label = "No phone or tablet connected"
         self.devices_item.set_label(label)
         self.dup_check.set_sensitive(self.watcher.enabled)
+        if self.phone_check.get_active() != self.watcher.enabled:
+            self.phone_check.set_active(self.watcher.enabled)
+        if self.settings is not None and self.settings.get_visible():
+            self.settings.refresh()
         return True
 
 
@@ -611,8 +664,16 @@ if __name__ == "__main__":
     _lock = open(os.path.join(CACHE_DIR, "app.lock"), "w")
     try:
         fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        notify("Already running: look for the alien in your panel")
+    except OSError:  # already running: ask that copy to open its Settings window
+        try:
+            with open(os.path.join(CACHE_DIR, "app.pid")) as f:
+                os.kill(int(f.read().strip()), signal.SIGUSR1)
+        except (OSError, ValueError):
+            notify("Already running: look for the alien in your panel")
         sys.exit(0)
-    App()
+    with open(os.path.join(CACHE_DIR, "app.pid"), "w") as f:
+        f.write(str(os.getpid()))
+    app = App()
+    if "--settings" in sys.argv:
+        GLib.idle_add(app.show_settings)
     Gtk.main()

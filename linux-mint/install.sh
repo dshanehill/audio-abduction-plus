@@ -65,6 +65,7 @@ fi
 
 install -m 644 audio-abduction-on.png audio-abduction-off.png ~/.local/share/audio-abduction/
 install -m 755 audio-abduction.py ~/.local/bin/audio-abduction
+install -m 644 aa_settings.py ~/.local/share/audio-abduction/
 
 # Retire the earlier unbranded version.
 pkill -f mac-audio-toggle || true
@@ -79,10 +80,19 @@ Exec=$HOME/.local/bin/audio-abduction
 Icon=$HOME/.local/share/audio-abduction/audio-abduction-on.png
 Categories=AudioVideo;Audio;
 X-GNOME-Autostart-enabled=true"
-echo "$DESKTOP" > ~/.config/autostart/audio-abduction.desktop
-echo "$DESKTOP" > ~/.local/share/applications/audio-abduction.desktop
+# Keep "Open at Login" off if it was turned off in Settings.
+if grep -q '^X-GNOME-Autostart-enabled=false' ~/.config/autostart/audio-abduction.desktop 2>/dev/null; then
+  echo "$DESKTOP" | sed 's/^X-GNOME-Autostart-enabled=true/X-GNOME-Autostart-enabled=false/' \
+    > ~/.config/autostart/audio-abduction.desktop
+else
+  echo "$DESKTOP" > ~/.config/autostart/audio-abduction.desktop
+fi
+# The menu entry opens the Settings window.
+echo "$DESKTOP" | sed "s|^Exec=.*|Exec=$HOME/.local/bin/audio-abduction --settings|" \
+  > ~/.local/share/applications/audio-abduction.desktop
 
 sleep 1
 nohup ~/.local/bin/audio-abduction >/dev/null 2>&1 &
 echo "Audio Abduction+ installed. Click the alien in your panel to toggle."
+echo "Right-click it and choose Settings… (or open Audio Abduction+ from the menu) to change settings."
 echo "Plug in an Android phone or tablet (USB debugging on) and its audio comes along too."
