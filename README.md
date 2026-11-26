@@ -47,9 +47,9 @@ You don't need Mouse Jumper+ to use Audio Abduction+, but they were built to wor
 | **What runs** | Nothing to install. USB debugging is turned on | A tray icon (the alien) in the panel, with a Settings window | An app with a Dock icon, a menu bar icon and a Settings window. It starts at login |
 | **What it does** | Sends its sound down the USB cable | Plays the phone and tablet sound, adds its own, and streams all of it over the network | Listens for the stream and plays it on the Mac's current output |
 
-- **Click the alien** to beam audio to the Mac. Click it again to bring audio back to the Linux PC's own speakers. Right-click for a menu.
+- **Click the alien** to beam audio to the Mac. Click it again to stop forwarding, so each computer plays its own sound. Right-click for a menu, which also has **Forward to Linux / Forward to Mac** (see below).
 - **Settings on the Linux PC:** right-click the alien and choose **Settings…**, or open Audio Abduction+ from the menu. It shows whether the Mac is receiving, which phones and tablets are connected, and has switches for everything below. You no longer need to edit the config file.
-- **Settings on the Mac:** click the Dock icon or the menu bar icon. It shows whether sound is arriving and where it's playing, and has a volume slider, a connection setting (choose Most Reliable if the sound skips), Open at Login, and Show in Dock or menu bar.
+- **Settings on the Mac:** click the Dock icon or the menu bar icon. It shows whether sound is arriving and where it's playing, and has the **Forward to Linux / Forward to Mac** button, a volume slider, a connection setting (choose Most Reliable if the sound skips), Open at Login, and Show in Dock or menu bar.
 - When you switch it on, any audio that's already playing moves over straight away. When you switch it off, your previous output is restored.
 - The receiver is tuned for low delay: late network packets are dropped instead of queued, so lag never builds up. When the stream stops, the Mac releases the audio device.
 - You can also toggle it from a keyboard shortcut by running `audio-abduction --toggle`.
@@ -102,11 +102,11 @@ Tested with a realme C85 phone (Android 16) and a Samsung Galaxy Tab S7 FE (Andr
 
 ## Under the hood
 
-The Linux side plays everything into a virtual sound card (the kernel's `snd-aloop`, shown as "Audio-Abduction+ (beam to Mac)") and uses PipeWire's `module-rtp-send` to send uncompressed 48 kHz stereo audio over RTP to UDP port 46000. The virtual card carries a latency offset equal to the delay to your ears, which is what lets video players hold the picture back. The Mac reports its output delay to UDP port 46001. The Mac side uses [SoX](https://sox.sourceforge.net) to play it. Phone and tablet audio arrives through scrcpy and plays into the same PipeWire output, so it travels to the Mac with everything else.
+The Linux side plays everything into a virtual sound card (the kernel's `snd-aloop`, shown as "Audio-Abduction+ (beam to Mac)") and uses PipeWire's `module-rtp-send` to send uncompressed 48 kHz stereo audio over RTP to UDP port 46000. The virtual card carries a latency offset equal to the delay to your ears, which is what lets video players hold the picture back. The Mac reports its output delay to UDP port 46001. The Mac side uses [SoX](https://sox.sourceforge.net) to play it. For **Forward to Linux**, the Mac captures its own sound with a Core Audio process tap (muting it locally) and sends it the other way, as RTP to UDP port 46000 on the Linux PC, where `pacat` plays it. The two apps share which way sound goes over UDP port 46002. Phone and tablet audio arrives through scrcpy and plays into the same PipeWire output, so it travels to the Mac with everything else.
 
 ## What you need
 
-- A Mac with [Homebrew](https://brew.sh) (the installer adds SoX)
+- A Mac running macOS 14.2 or newer, with [Homebrew](https://brew.sh) (the installer adds SoX)
 - A PC running Linux Mint 22 or later (Cinnamon) with PipeWire. Other desktops get a basic tray icon.
 - Both computers on the same network, or connected through [Tailscale](https://tailscale.com)
 - Optional: Android phones or tablets running Android 11 or newer, with USB debugging turned on, and USB cables that carry data, not just power
@@ -135,7 +135,9 @@ When asked, type your Linux password (to install a few system packages, includin
 
 ## Troubleshooting
 
-- **No sound on the Mac:** open Audio Abduction+ on the Mac and check that **Play Sound From PC** is on and the status says it's playing. On the Linux PC, Settings shows **Waiting for your Mac** if the Mac isn't answering. The Mac's log is under **Having trouble? › Show Log** (`/tmp/audio-abduction.log`). Make sure nothing (such as a firewall) is blocking UDP ports 46000 and 46001.
+- **No sound on the Mac:** open Audio Abduction+ on the Mac and check that **Sound Goes To** says this Mac (if not, click **Forward to Mac**) and the status says it's playing. On the Linux PC, Settings shows **Waiting for your Mac** if the Mac isn't answering. The Mac's log is under **Having trouble? › Show Log** (`/tmp/audio-abduction.log`). Make sure nothing (such as a firewall) is blocking UDP ports 46000, 46001 and 46002.
+- **No sound on the Linux PC after Forward to Linux:** check **System Settings › Privacy & Security › Screen & System Audio Recording** on the Mac and make sure Audio Abduction+ is allowed. Both apps must be running; the Mac's Settings window says **Waiting for your PC** if the PC isn't answering.
+- **The two computers show different choices:** wait a couple of seconds. They check in with each other every 2 seconds, and the most recent click wins.
 - **Wrong Mac address:** on the Linux PC, open Settings and change **Mac Name or Address**.
 - **"Couldn't switch" message:** the notification includes the reason. Audio stays on the Linux PC until it's fixed.
 - **Phone or tablet isn't detected:** plug it straight into the Linux PC rather than a keyboard hub, try a different cable, and check that USB debugging is on. If it asks, tap **Allow** on the device.
