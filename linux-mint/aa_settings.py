@@ -2,7 +2,7 @@
 
 A plain-language window in the style of a Mac settings pane: grouped rows, switches
 on the right, short explanations under each setting. It controls what the Linux side
-does: send this PC's sound to the Mac, which Mac to send to, phone and tablet sound,
+does: which way sound goes (this PC to the Mac, or the Mac to this PC), which Mac to send to, phone and tablet sound,
 and keeping video in step with the sound.
 
 `app` is the running tray App from audio-abduction; `aa` is that script's module, so
@@ -114,13 +114,21 @@ class SettingsWindow(Gtk.Window):
         head.pack_start(htext, True, True, 0)
         page.pack_start(head, False, False, 4)
 
-        # --- Send sound to Mac ---
-        self.beam = Gtk.Switch()
-        self.beam.connect("notify::active", self.on_beam)
+        # --- Which way sound goes (shared with the Mac) ---
+        self.forward_btn = Gtk.Button(label="Forward to Mac")
+        self.forward_btn.get_style_context().add_class("suggested-action")
+        self.forward_btn.connect("clicked", lambda *_: self.app.forward())
+        self.stop_btn = Gtk.Button(label="Stop")
+        self.stop_btn.connect("clicked", lambda *_: self.app.set_mode("off"))
+        fbox = Gtk.Box(spacing=8)
+        fbox.pack_start(self.stop_btn, False, False, 0)
+        fbox.pack_start(self.forward_btn, False, False, 0)
+        self.forward_row = _row("Sound Goes To", "", fbox)
         page.pack_start(Gtk.Box(), False, False, 6)
-        page.pack_start(_group(_row("Send Sound to Mac",
-                                    "Everything this PC plays, including phones and tablets "
-                                    "plugged into it, comes out of your Mac.", self.beam)),
+        page.pack_start(_group(self.forward_row), False, False, 0)
+        page.pack_start(_label("Forward to Mac plays this PC's sound on your Mac. Forward to "
+                               "Linux plays your Mac's sound on this PC. Clicking either one, "
+                               "here or on the Mac, switches both computers.", "aa-footer"),
                         False, False, 0)
 
         # --- Your Mac ---
@@ -237,38 +245,54 @@ class SettingsWindow(Gtk.Window):
 
     def refresh(self):
         """Update the live parts: status, Mac connection, connected devices."""
-        aa, on = self.aa, self.aa.is_on()
-        self._quiet = True
-        self.beam.set_active(on)
-        self._quiet = False
+        aa, mode = self.aa, self.app.mode
+        on = mode == "mac"
+        self.forward_btn.set_label(aa.forward_label(mode))
+        self.stop_btn.set_visible(mode != "off")
+        peer_ok = aa._peer_last and time.time() - aa._peer_last < 6
+        self.forward_row.sub_lab.set_text({
+            "mac": "Your Mac. Everything this PC plays, including plugged-in phones and "
+                   "tablets, comes out of the Mac.",
+            "linux": "This PC. Your Mac's sound comes out of this PC's speakers.",
+            "off": "Each computer plays its own sound."}[mode])
 
         mac_age = time.time() - aa._mac_last if aa._mac_last else None
         mac_ok = mac_age is not None and mac_age < 5
         try:
             self.head_icon.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_size(
-                aa.ICON_ON if on else aa.ICON_OFF, 56, 56))
+                aa.ICON_ON if mode != "off" else aa.ICON_OFF, 56, 56))
         except GLib.Error:
             pass
-        if on and mac_ok:
+        if mode == "linux" and self.app.mac_sound.playing():
+            self.headline.set_markup(f"{_dot(GREEN)}  Playing your Mac's sound")
+            self.detail.set_text("Everything you play on the Mac comes out of this PC.")
+        elif mode == "linux":
+            self.headline.set_markup(f"{_dot(ORANGE)}  Waiting for your Mac's sound")
+            self.detail.set_text("Nothing is arriving yet. Play something on the Mac. If it "
+                                 "stays quiet, make sure Audio Abduction+ is open on the Mac." if
+                                 peer_ok else "Your Mac isn't answering. Make sure Audio "
+                                 "Abduction+ is open on the Mac.")
+        elif on and mac_ok:
             self.headline.set_markup(f"{_dot(GREEN)}  Sending sound to your Mac")
             self.detail.set_text("Everything you play on this PC comes out of the Mac.")
         elif on:
             self.headline.set_markup(f"{_dot(ORANGE)}  Waiting for your Mac")
             self.detail.set_text("Sound is being sent, but the Mac isn't answering. Make sure "
-                                 "Audio Abduction+ is open on the Mac and its Play Sound From "
-                                 "PC switch is on.")
+                                 "Audio Abduction+ is open on the Mac.")
         else:
             self.headline.set_markup(f"{_dot(GREY)}  Playing on this PC")
-            self.detail.set_text("Turn on Send Sound to Mac to hear this PC through your Mac.")
+            self.detail.set_text("Click Forward to Mac to hear this PC through your Mac.")
 
-        if not on:
-            self.mac_status.set_text("Not in use while sound plays on this PC.")
-        elif mac_ok:
-            self.mac_status.set_text("Connected. Your Mac is playing the sound.")
+        linked = mac_ok or peer_ok
+        if linked:
+            self.mac_status.set_text("Connected. Your Mac is answering.")
+        elif mode == "off":
+            self.mac_status.set_text("Your Mac isn't answering. That's fine while nothing is "
+                                     "being forwarded.")
         else:
             self.mac_status.set_text("No answer from the Mac yet.")
         self.mac_row.title_lab.set_markup(
-            f"{_dot(GREEN if on and mac_ok else ORANGE if on else GREY)}  Connection")
+            f"{_dot(GREEN if linked else ORANGE if mode != 'off' else GREY)}  Connection")
 
         # Devices
         for child in self.devices.get_children():
@@ -300,11 +324,6 @@ class SettingsWindow(Gtk.Window):
             self.delay_row.sub_lab.set_text(f"Picture held back by {ms / 1000:.2f} seconds")
 
     # ------------------------------------------------------------------ handlers
-    def on_beam(self, sw, _):
-        if not self._quiet and sw.get_active() != self.aa.is_on():
-            self.app.toggle()
-            self.refresh()
-
     def _host_dirty(self):
         saved = self.aa.read_config().get("MAC_HOST", "")
         text = self.host.get_text().strip()

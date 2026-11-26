@@ -54,6 +54,17 @@ You don't need Mouse Jumper+ to use Audio Abduction+, but they were built to wor
 - The receiver is tuned for low delay: late network packets are dropped instead of queued, so lag never builds up. When the stream stops, the Mac releases the audio device.
 - You can also toggle it from a keyboard shortcut by running `audio-abduction --toggle`.
 
+## Forward to Linux, Forward to Mac
+
+Sometimes you want the Linux PC's speakers or headphones instead. Both apps have a **Forward to Linux / Forward to Mac** button: in the Mac's menu bar menu and Settings window, and in the Linux tray menu and Settings window.
+
+- **Forward to Mac** (the usual way): the Linux PC's sound plays on the Mac.
+- **Forward to Linux**: everything the Mac plays is sent to the Linux PC and comes out of its speakers instead. The Mac's own speakers go quiet while this is on.
+- **Stop Forwarding**: each computer plays its own sound. Clicking the alien in the Linux panel also stops forwarding, or starts forwarding to the Mac.
+- Clicking any of these on either computer switches both. The two apps tell each other their choice every 2 seconds on UDP port 46002, and the most recent click wins.
+- The first time you choose Forward to Linux, macOS asks to let Audio Abduction+ record system audio. Click Allow. If the PC hears nothing, check **System Settings › Privacy & Security › Screen & System Audio Recording**. This needs macOS 14.2 or newer.
+- The Mac finds the PC by its check-ins, so the Linux app needs to be running. Nothing needs setting up on the Mac.
+
 ## Video stays in step with the sound
 
 Sending sound to another computer and then over Bluetooth takes time: about a quarter of a second with Bluetooth headphones. Audio Abduction+ never holds the sound back to fix that. Instead, on the Linux PC, it tells video players exactly how late the sound will arrive, so they hold the **picture** back by the same amount and lips stay matched to words.

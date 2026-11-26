@@ -25,7 +25,7 @@ APP="$HOME/Applications/Audio Abduction+.app"
 PLIST="$HOME/Library/LaunchAgents/local.audio-abduction.plus.plist"
 BUILD=$(mktemp -d)
 echo "Building Audio Abduction+..."
-swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14" \
+swiftc -swift-version 5 -O -target "$(uname -m)-apple-macos14.2" \
   -o "$BUILD/AudioAbduction" AudioAbduction.swift
 
 launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true

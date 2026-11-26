@@ -5,6 +5,10 @@ Left-click the tray icon to toggle. Right-click for the menu.
 ON  : loads a network (RTP) sink pointed at the Mac and makes it the default output.
 OFF : removes it and restores your previous output.
 
+Forward to Linux / Forward to Mac (menu, or Settings): switches which way sound goes.
+"Forward to Linux" plays the Mac's sound on this PC instead. The choice is shared with
+the Mac app, so clicking it on either computer switches both.
+
 Phone and tablet audio: plug an Android phone or tablet (Android 11+, USB debugging
 on) into this PC and its sound plays here through scrcpy, in audio-only mode with no
 window. It goes wherever this PC's sound goes, so while beaming is on it reaches the Mac.
@@ -178,6 +182,34 @@ def turn_on():
     move_all_streams(sink)
 
 
+def settle_output(mode):
+    """Make sure the default output matches the mode.
+
+    Right after a switch, PipeWire sometimes picks the default output again by itself
+    (e.g. when the virtual card is re-created), which can leave sound going nowhere.
+    """
+    try:
+        current = sh("pactl", "get-default-sink")
+    except RuntimeError:
+        return
+    a = aloop_sink()
+    beam_sinks = {SINK_NAME} | ({a[0]} if a else set())
+    if mode == "mac":
+        want = a[0] if a else SINK_NAME
+        if current != want and is_on():
+            subprocess.run(["pactl", "set-default-sink", want], capture_output=True)
+            move_all_streams(want)
+    elif current in beam_sinks:  # stuck on the beaming card: back to the real speakers
+        try:
+            with open(PREV_FILE) as f:
+                prev = f.read().strip()
+        except FileNotFoundError:
+            return
+        if prev and prev not in beam_sinks:
+            subprocess.run(["pactl", "set-default-sink", prev], capture_output=True)
+            move_all_streams(prev)
+
+
 def turn_off():
     for mid in reversed(our_module_ids()):
         subprocess.run(["pactl", "unload-module", mid], capture_output=True)
@@ -225,6 +257,194 @@ def listen_for_mac_delay():
                     applied = total
         except (ValueError, OSError):
             continue
+
+
+# ---------------------------------------------------------------------------
+# Which way sound goes: shared with the Mac
+# ---------------------------------------------------------------------------
+# "mac"   : this PC's sound plays on the Mac (beaming, as before)
+# "linux" : the Mac's sound plays on this PC
+# "off"   : each computer plays its own sound
+# Both computers keep the same choice. Each sends "AAMODE <mode> <time chosen>" to the
+# other every 2 s (and straight away after a click); the most recent choice wins.
+
+MODES = ("mac", "linux", "off")
+CONTROL_PORT = PORT + 2
+_peer_last = 0.0  # when the Mac last checked in on the control port
+
+
+def forward_target(mode):
+    """Where the Forward button sends sound next (from this PC's point of view)."""
+    return "linux" if mode == "mac" else "mac"
+
+
+def forward_label(mode):
+    return "Forward to Linux" if forward_target(mode) == "linux" else "Forward to Mac"
+
+
+def mode_message(mode):
+    return {"mac": "Sound from this PC now plays on your Mac 🛸",
+            "linux": "Sound from your Mac now plays on this PC 🛸",
+            "off": "Forwarding stopped. Each computer plays its own sound."}[mode]
+
+
+def control_loop(app):
+    """Hear the Mac's choice, and tell the Mac ours every 2 s."""
+    global _peer_last
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(("0.0.0.0", CONTROL_PORT))
+    except OSError as e:
+        print(f"control port {CONTROL_PORT}: {e}", file=sys.stderr)
+        return
+    sock.settimeout(0.5)
+    app.control_sock = sock
+    last_beat = 0.0
+    while True:
+        try:
+            parts = sock.recv(128).decode(errors="ignore").split()
+            if len(parts) == 3 and parts[0] == "AAMODE" and parts[1] in MODES:
+                _peer_last = time.time()
+                GLib.idle_add(app.peer_mode, parts[1], float(parts[2]))
+        except socket.timeout:
+            pass
+        except (ValueError, OSError):
+            pass
+        if time.time() - last_beat >= 2:
+            last_beat = time.time()
+            send_mode(sock, app.mode, app.stamp)
+
+
+def send_mode(sock, mode, stamp):
+    try:
+        sock.sendto(f"AAMODE {mode} {stamp:.3f}".encode(),
+                    (socket.gethostbyname(mac_host()), CONTROL_PORT))
+    except (OSError, RuntimeError):
+        pass
+
+
+RTP_RATES = {10: 44100, 96: 48000, 97: 96000, 98: 88200}  # payload type -> sample rate
+
+
+def rtp_payload(pkt):
+    if len(pkt) < 12 or pkt[0] >> 6 != 2:
+        return None
+    off = 12 + 4 * (pkt[0] & 0x0F)
+    if pkt[0] & 0x10:  # header extension
+        off += 4 + 4 * int.from_bytes(pkt[off + 2:off + 4], "big")
+    data = pkt[off:]
+    if pkt[0] & 0x20 and data:  # padding
+        data = data[:-data[-1]]
+    return data
+
+
+class MacSound:
+    """Plays the Mac's sound on this PC (mode "linux").
+
+    The Mac sends RTP (16-bit big-endian stereo) to UDP PORT; each packet's audio goes
+    to `pacat`, which plays it on this PC's current output. Late packets are dropped so
+    delay never builds up, and the player closes after 1 s of silence.
+    """
+
+    IDLE = 1.0
+
+    def __init__(self):
+        self.thread = None
+        self.stop_ev = threading.Event()
+        self.last = 0.0  # when sound last arrived
+
+    def start(self):
+        if self.thread and self.thread.is_alive() and not self.stop_ev.is_set():
+            return
+        self.stop_ev = threading.Event()
+        self.thread = threading.Thread(target=self._run, args=(self.stop_ev,), daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_ev.set()
+        self.last = 0.0
+
+    def playing(self):
+        return time.time() - self.last < 3
+
+    @staticmethod
+    def _player(rate):
+        # Name the output: PipeWire may otherwise reuse where this stream played last time
+        # (e.g. the beaming card), and the sound would go nowhere.
+        try:
+            dev = [f"--device={sh('pactl', 'get-default-sink')}"]
+        except RuntimeError:
+            dev = []
+        p = subprocess.Popen(
+            ["pacat", "--playback", "--raw", "--format=s16be", f"--rate={rate}", *dev,
+             "--channels=2", "--latency-msec=40", "--client-name=Audio Abduction+",
+             "--stream-name=Sound from your Mac"],
+            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, preexec_fn=_die_with_parent)
+        os.set_blocking(p.stdin.fileno(), False)
+        return p
+
+    @staticmethod
+    def _close(p):
+        if p is None:
+            return
+        try:
+            p.stdin.close()
+        except OSError:
+            pass
+        try:
+            p.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+    def _run(self, stop):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        for _ in range(20):  # an earlier copy may still be letting go of the port
+            try:
+                sock.bind(("0.0.0.0", PORT))
+                break
+            except OSError:
+                if stop.wait(0.2):
+                    return
+        else:
+            notify(f"Couldn't listen for the Mac's sound (port {PORT} is busy)")
+            return
+        sock.settimeout(0.5)
+        player, rate, last_seq, pending = None, None, None, b""
+        try:
+            while not stop.is_set():
+                try:
+                    pkt = sock.recv(4096)
+                except socket.timeout:
+                    if player and time.time() - self.last > self.IDLE:
+                        self._close(player)
+                        player, last_seq = None, None
+                    continue
+                data = rtp_payload(pkt)
+                if not data:
+                    continue
+                seq = int.from_bytes(pkt[2:4], "big")
+                if last_seq is not None and ((seq - last_seq) & 0xFFFF) > 0x8000:
+                    continue  # late packet: drop it
+                last_seq = seq
+                self.last = time.time()
+                r = RTP_RATES.get(pkt[1] & 0x7F, 48000)
+                if player is None or player.poll() is not None or r != rate:
+                    self._close(player)
+                    rate, pending = r, b""
+                    player = self._player(rate)
+                try:
+                    buf = pending + data
+                    n = os.write(player.stdin.fileno(), buf)
+                    pending = buf[n:][-4096:]
+                except BlockingIOError:
+                    pass  # player is behind: drop this packet
+                except OSError:
+                    self._close(player)
+                    player = None
+        finally:
+            sock.close()
+            self._close(player)
 
 
 # ---------------------------------------------------------------------------
@@ -539,10 +759,23 @@ class DeviceWatcher:
 class App:
     def __init__(self):
         self.watcher = DeviceWatcher(self.refresh)
+        self.mac_sound = MacSound()
+        self.control_sock = None
+        cfg = read_config()
+        self.mode = cfg.get("MODE") if cfg.get("MODE") in MODES else ("mac" if is_on() else "off")
+        try:
+            self.stamp = float(cfg.get("MODE_STAMP", "0"))
+        except ValueError:
+            self.stamp = 0.0
+        self._last_heal = 0.0
 
         self.menu = Gtk.Menu()
-        self.check = Gtk.CheckMenuItem(label="Beam audio to Mac")
-        self.check_handler = self.check.connect("toggled", lambda *_: self.toggle())
+        self.status_item = Gtk.MenuItem(label="")
+        self.status_item.set_sensitive(False)
+        self.forward_item = Gtk.MenuItem(label="")
+        self.forward_item.connect("activate", lambda *_: self.forward())
+        self.stop_item = Gtk.MenuItem(label="Stop Forwarding")
+        self.stop_item.connect("activate", lambda *_: self.set_mode("off"))
 
         self.phone_check = Gtk.CheckMenuItem(label="Phone and tablet audio")
         self.phone_check.set_active(self.watcher.enabled)
@@ -558,7 +791,8 @@ class App:
         self.settings = None
         quit_item = Gtk.MenuItem(label="Quit")
         quit_item.connect("activate", lambda *_: self.quit())
-        for item in (self.check, Gtk.SeparatorMenuItem(), self.phone_check, self.dup_check,
+        for item in (self.status_item, self.forward_item, self.stop_item,
+                     Gtk.SeparatorMenuItem(), self.phone_check, self.dup_check,
                      self.devices_item, Gtk.SeparatorMenuItem(), settings_item, quit_item):
             self.menu.append(item)
         self.menu.show_all()
@@ -570,11 +804,13 @@ class App:
             self.icon.connect("activate", self.on_click)
         else:  # fallback for non-Cinnamon desktops
             self.icon = Gtk.StatusIcon()
-            self.icon.connect("activate", lambda *_: self.toggle())
+            self.icon.connect("activate", lambda *_: self.click_toggle())
             self.icon.connect("popup-menu", lambda i, b, t: self.menu.popup(
                 None, None, Gtk.StatusIcon.position_menu, i, b, t))
 
+        self.apply_mode()
         threading.Thread(target=listen_for_mac_delay, daemon=True).start()
+        threading.Thread(target=control_loop, args=(self,), daemon=True).start()
         self.refresh()
         GLib.timeout_add_seconds(2, self.refresh)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.quit)
@@ -582,6 +818,9 @@ class App:
         # Opening the app again from the menu sends SIGUSR1: show Settings.
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
                              lambda *_: self.show_settings() or True)
+        # `audio-abduction --toggle` (e.g. a keyboard shortcut) sends SIGUSR2.
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR2,
+                             lambda *_: self.click_toggle() or True)
         self.watcher.start()
 
     def show_settings(self):
@@ -594,45 +833,111 @@ class App:
 
     def quit(self, *_):
         self.watcher.shutdown()
+        self.mac_sound.stop()
         Gtk.main_quit()
         return False
 
     def on_click(self, _icon, button, _time):
         if button == 1:
-            self.toggle()
+            self.click_toggle()
 
     def on_phone_toggled(self, widget):
         self.watcher.set_enabled(widget.get_active())
         self.refresh()
 
-    def toggle(self):
-        try:
-            if is_on():
-                turn_off()
-                notify("Audio back on this computer")
-            else:
-                turn_on()
-                notify("Audio beamed up to your Mac 🛸")
-        except Exception as e:  # show the reason instead of failing silently
-            notify(f"Couldn't switch: {e}")
-            turn_off()
+    # -- which way sound goes --
+    def click_toggle(self):
+        """Clicking the alien: start beaming to the Mac, or stop whatever is happening."""
+        self.set_mode("mac" if self.mode == "off" else "off")
+
+    def forward(self):
+        self.set_mode(forward_target(self.mode))
+
+    def set_mode(self, mode, stamp=None, from_mac=False):
+        changed = mode != self.mode
+        self.mode = mode
+        self.stamp = stamp if stamp is not None else time.time()
+        set_config("MODE", mode)
+        set_config("MODE_STAMP", f"{self.stamp:.3f}")
+        ok = self.apply_mode()
+        if not from_mac:
+            self.announce()
+        if ok and (changed or not from_mac):
+            notify(("Your Mac switched it. " if from_mac else "") + mode_message(mode))
         self.refresh()
 
+    def peer_mode(self, mode, stamp):
+        """The Mac told us its choice: take it if it's newer than ours."""
+        if stamp > self.stamp + 0.0005:
+            self.set_mode(mode, stamp, from_mac=True)
+        return False
+
+    def announce(self):
+        """Tell the Mac now (a few times, in case a packet is lost)."""
+        sock, mode, stamp = self.control_sock, self.mode, self.stamp
+        if sock is None:
+            return
+
+        def send():
+            for wait in (0, 0.3, 0.7):
+                time.sleep(wait)
+                send_mode(sock, mode, stamp)
+        threading.Thread(target=send, daemon=True).start()
+
+    def apply_mode(self, quiet=False):
+        """Make this PC do what the current mode says. Returns False if it couldn't."""
+        try:
+            if self.mode == "mac":
+                self.mac_sound.stop()
+                if not is_on():
+                    turn_on()
+            else:
+                if is_on():
+                    turn_off()
+                if self.mode == "linux":
+                    self.mac_sound.start()
+                else:
+                    self.mac_sound.stop()
+            return True
+        except Exception as e:  # show the reason instead of failing silently
+            if not quiet:
+                notify(f"Couldn't switch: {e}")
+            turn_off()
+            return False
+        finally:
+            for ms in (1500, 4000):
+                GLib.timeout_add(ms, lambda: settle_output(self.mode) and False)
+
     def refresh(self):
-        on = is_on()
+        mode = self.mode
+        # Keep things matching the mode (e.g. beaming couldn't start at login: retry).
+        if mode == "mac" and not is_on() and time.time() - self._last_heal > 10:
+            self._last_heal = time.time()
+            self.apply_mode(quiet=True)
+        elif mode != "mac":
+            settle_output(mode)
+        on = mode != "off"
         names = self.watcher.names()
         extra = f" + {', '.join(names)}" if names else ""
+        if mode == "mac":
+            tip = f"{APP_NAME}: this PC's sound{extra} plays on the Mac"
+            status = "Sound plays on your Mac"
+        elif mode == "linux":
+            tip = f"{APP_NAME}: the Mac's sound plays here"
+            status = "Mac sound plays here" if self.mac_sound.playing() \
+                else "Mac sound plays here (waiting for it)"
+        else:
+            tip = f"{APP_NAME}: each computer plays its own sound{extra}"
+            status = "Not forwarding"
         if XApp is not None:
             self.icon.set_icon_name(ICON_ON if on else ICON_OFF)
-            self.icon.set_tooltip_text(
-                f"{APP_NAME}: beaming to Mac{extra} (click to stop)" if on
-                else f"{APP_NAME}: audio here{extra} (click to beam to Mac)")
+            self.icon.set_tooltip_text(tip + (" (click to stop)" if on else " (click to beam to Mac)"))
         else:
             self.icon.set_from_file(ICON_ON if on else ICON_OFF)
-            self.icon.set_tooltip_text(f"{APP_NAME}: {'on' if on else 'off'}{extra}")
-        self.check.handler_block(self.check_handler)
-        self.check.set_active(on)
-        self.check.handler_unblock(self.check_handler)
+            self.icon.set_tooltip_text(tip)
+        self.status_item.set_label(status)
+        self.forward_item.set_label(forward_label(mode))
+        self.stop_item.set_sensitive(on)
 
         if not self.watcher.enabled:
             label = "Phone and tablet audio is off"
@@ -653,11 +958,15 @@ class App:
 
 if __name__ == "__main__":
     if "--toggle" in sys.argv:  # also usable from a keyboard shortcut
-        try:
-            turn_off() if is_on() else turn_on()
-        except Exception as e:
-            notify(f"Couldn't switch: {e}")
-            turn_off()
+        try:  # the running copy does it, so the Mac hears about it too
+            with open(os.path.join(CACHE_DIR, "app.pid")) as f:
+                os.kill(int(f.read().strip()), signal.SIGUSR2)
+        except (OSError, ValueError):
+            try:
+                turn_off() if is_on() else turn_on()
+            except Exception as e:
+                notify(f"Couldn't switch: {e}")
+                turn_off()
         sys.exit(0)
     import fcntl  # only one tray copy at a time (the menu entry may be clicked while running)
     os.makedirs(CACHE_DIR, exist_ok=True)
