@@ -65,6 +65,15 @@ Sometimes you want the Linux PC's speakers or headphones instead. Both apps have
 - The first time you choose Forward to Linux, macOS asks to let Audio Abduction+ record system audio. Click Allow. If the PC hears nothing, check **System Settings › Privacy & Security › Screen & System Audio Recording**. This needs macOS 14.2 or newer.
 - The Mac finds the PC by its check-ins, so the Linux app needs to be running. Nothing needs setting up on the Mac.
 
+### Using a screen reader on the Linux PC
+
+If you use a screen reader on the Linux PC, its speech can sometimes crackle while it's being sent to the Mac. I see this with **Lucent**, the magnifier and reader I made for Linux Mint. It does many of the same jobs as ZoomText: it magnifies the screen and reads text aloud.
+
+- **Quick fix:** restart the reader. Lucent has a Restart button for this, and the speech comes back clean.
+- **Make the Linux PC your main computer for sound:** click **Forward to Linux**. The reader then speaks straight through the PC's own speakers or headphones, with nothing sent over the network, and your Mac's sound comes along to the PC. Click **Forward to Mac** whenever you want to switch back.
+
+ZoomText is a trademark of its owner. Lucent and Audio Abduction+ are not connected with it.
+
 ## Video stays in step with the sound
 
 Sending sound to another computer and then over Bluetooth takes time: about a quarter of a second with Bluetooth headphones. Audio Abduction+ never holds the sound back to fix that. Instead, on the Linux PC, it tells video players exactly how late the sound will arrive, so they hold the **picture** back by the same amount and lips stay matched to words.
